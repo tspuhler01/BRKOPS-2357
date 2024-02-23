@@ -1,0 +1,19 @@
+{
+    "ietf-yang-library:modules-state": {
+        "module-set-id": "7ca8fffa-f3d6-452b-870a-a8473d854560",
+        "module": [
+            {
+                "name": "site-service",
+                "revision": "2024-01-18",
+                "namespace": "https://its-best.ch/site-service",
+                "conformance-type": "implement"
+            },
+            {
+                "name": "vpn-service",
+                "revision": "2024-01-18",
+                "namespace": "https://its-best.ch/vpn-service",
+                "conformance-type": "implement"
+            }
+        ]
+    }
+}

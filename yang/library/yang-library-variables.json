@@ -1,0 +1,37 @@
+{
+    "ietf-yang-library:modules-state": {
+        "module-set-id": "7ca8fffa-f3d6-452b-870a-a8473d854561",
+        "module": [
+            {
+                "name": "ietf-inet-types",
+                "revision": "2013-07-15",
+                "namespace": "urn:ietf:params:xml:ns:yang:ietf-inet-types",
+                "conformance-type": "implement"
+            },
+            {
+                "name": "site-service",
+                "revision": "2024-01-18",
+                "namespace": "https://its-best.ch/site-service",
+                "conformance-type": "implement"
+            },
+            {
+                "name": "vpn-service",
+                "revision": "2024-01-18",
+                "namespace": "https://its-best.ch/vpn-service",
+                "conformance-type": "implement"
+            },
+            {
+                "name": "routing",
+                "revision": "2024-01-18",
+                "namespace": "https://its-best.ch/routing",
+                "conformance-type": "implement"
+            },
+            {
+                "name": "switching",
+                "revision": "2024-01-18",
+                "namespace": "https://its-best.ch/switching",
+                "conformance-type": "implement"
+            }
+        ]
+    }
+}

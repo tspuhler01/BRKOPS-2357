@@ -1,0 +1,46 @@
+{
+    "site-service:sites": [
+        {
+            "id": 1,
+            "name": "site-01",
+            "type": "DC",
+            "router": [
+                "C8K-2FB10C36-5D28-E899-38EB-8CEC7F016537"
+            ],
+            "switches": []
+        },
+        {
+            "id": 10,
+            "name": "site-10",
+            "type": "Branch",
+            "router": [
+                "C8K-4147B55B-BD07-3933-AA31-6910621014ED"
+            ],
+            "switches": [
+                "BRK2357S10S"
+            ]
+        },
+        {
+            "id": 11,
+            "name": "site-11",
+            "type": "Branch",
+            "router": [
+                "C8K-5AACBE79-1509-ECBA-DA10-CA6749FC73DD"
+            ],
+            "switches": [
+                "BRK2357S11S"
+            ]
+        },
+        {
+            "id": 12,
+            "name": "site-12",
+            "type": "Branch",
+            "router": [
+                "C8K-85E55379-9B22-F67D-721A-359D428DD23A"
+            ],
+            "switches": [
+                "BRK2357S12S"
+            ]
+        }
+    ]
+}
