@@ -1,0 +1,299 @@
+# Copyright (c) 2024 Cisco and/or its affiliates.
+# 
+# This software is licensed to you under the terms of the Cisco Sample
+# Code License, Version 1.1 (the "License"). You may obtain a copy of the
+# License at
+# 
+#                https://developer.cisco.com/docs/licenses
+# 
+# All use of the material herein must be in accordance with the terms of
+# the License. All rights not expressly granted by the License are
+# reserved. Unless required by applicable law or agreed to separately in
+# writing, software distributed under the License is distributed on an "AS
+# IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+# or implied.
+
+default:
+  image: git.its-best.ch:5050/ciscolive/brkops-2357:1.2
+
+stages:
+  - build
+  - plan
+  - deploy
+  - test
+  - lifecycle
+
+# staging pipeline
+
+staging:load_and_validate_svc:
+  stage: .pre
+  extends:
+    - .merge_request
+  script:
+    - cd ./utils
+    - python3 loader.py services
+  artifacts:
+    paths:
+      - ./services/terraform/netbox/terraform.tfvars.json
+
+staging:deploy_netbox:
+  stage: .pre
+  extends:
+    - .terraform
+    - .merge_request
+  script:
+    - terraform plan -out "planfile"
+    - terraform apply -input=false "planfile"
+  variables:
+    DIRECTORY: netbox
+    STATE: netbox-dev
+  needs:
+    - staging:load_and_validate_svc
+
+staging:load_and_validate_vars:
+  stage: build
+  extends:
+    - .merge_request
+  script:
+    - cd ./utils
+    - python3 loader.py variables
+  artifacts:
+    paths:
+      - ./services/terraform/routing/terraform.tfvars.json
+      - ./services/terraform/switching/terraform.tfvars.json
+  needs:
+    - staging:deploy_netbox
+
+staging:plan_routing:
+  stage: plan
+  extends:
+    - .terraform
+    - .merge_request
+  script:
+    - terraform validate
+    - terraform plan -out "planfile"
+    - terraform show --json planfile | convert_report > planfile_json
+  variables:
+    DIRECTORY: routing
+    STATE: routing
+  artifacts:
+    reports:
+      terraform: ./services/terraform/routing/planfile_json
+  needs:
+    - staging:load_and_validate_vars
+
+staging:plan_switching:
+  stage: plan
+  extends:
+    - .terraform
+    - .merge_request
+  script:
+    - terraform validate
+    - terraform plan -out "planfile"
+    - terraform show --json planfile | convert_report > planfile_json
+  variables:
+    DIRECTORY: switching
+    STATE: switching
+  artifacts:
+    reports:
+      terraform: ./services/terraform/switching/planfile_json
+  needs:
+    - staging:load_and_validate_vars
+
+staging:cleanup_netbox:
+  stage: .post
+  extends:
+    - .terraform
+    - .merge_request
+  script:
+    - terraform destroy -auto-approve
+  variables:
+    DIRECTORY: netbox
+    STATE: netbox-staging
+  needs:
+    - staging:load_and_validate_svc
+    - staging:load_and_validate_vars
+
+# production pipeline
+
+prod:load_and_validate_svc:
+  stage: .pre
+  extends:
+    - .merge_commit
+  script:
+    - cd ./utils
+    - python3 loader.py services
+  artifacts:
+    paths:
+      - ./services/terraform/netbox/terraform.tfvars.json
+
+prod:deploy_netbox:
+  stage: .pre
+  extends:
+    - .terraform
+    - .merge_commit
+  script:
+    - terraform plan -out "planfile"
+    - terraform apply -input=false "planfile"
+  variables:
+    DIRECTORY: netbox
+    STATE: netbox
+  artifacts:
+    reports:
+      dotenv: ./services/terraform/netbox/site.env
+  needs:
+    - prod:load_and_validate_svc
+
+prod:load_and_validate_vars:
+  stage: build
+  extends:
+    - .merge_commit
+  script:
+    - cd ./utils
+    - python3 loader.py variables
+  artifacts:
+    paths:
+      - ./services/terraform/routing/terraform.tfvars.json
+      - ./services/terraform/switching/terraform.tfvars.json
+  needs:
+    - prod:deploy_netbox
+
+prod:deploy_routing:
+  stage: deploy
+  extends:
+    - .terraform
+    - .merge_commit
+  script:
+    - terraform plan -out "planfile"
+    - terraform apply -input=false "planfile"
+  variables:
+    DIRECTORY: routing
+    STATE: routing
+  needs:
+    - prod:load_and_validate_vars
+
+prod:testing_connectivity:
+  stage: deploy
+  tags:
+    - pyats
+  extends:
+    - .merge_commit
+    - .testing
+  script:
+    - rm -rf /home/gitlab-runner/.ssh/known_hosts
+    - if [ -n "$ADDED_SITE" ]; then pyats run job basic_connectivity_job.py --webex-token $WEBEX_TOKEN --webex-space $WEBEX_PYATS_SPACE --archive-dir $PYATS_ARCHIVE ; fi 
+  needs:
+    - prod:deploy_netbox
+    - prod:deploy_routing
+
+prod:deploy_switching:
+  stage: deploy
+  extends:
+    - .terraform
+    - .merge_commit
+  script:
+    - terraform plan -out "planfile"
+    - terraform apply -input=false "planfile"
+  variables:
+    DIRECTORY: switching
+    STATE: switching
+  needs:
+    - prod:testing_connectivity
+    - prod:load_and_validate_vars
+
+prod:validate_site_service:
+  stage: test
+  tags:
+    - pyats
+  extends:
+    - .testing
+  script:
+    - if [ -n "$ADDED_SITE" ]; then pyats run job site_service_job.py --webex-token $WEBEX_TOKEN --webex-space $WEBEX_PYATS_SPACE --archive-dir $PYATS_ARCHIVE ; fi
+  needs:
+    - prod:load_and_validate_vars
+    - prod:deploy_netbox
+    - prod:deploy_routing
+    - prod:deploy_switching
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
+      changes: 
+        - services/sites.json
+
+prod:validate_vpn_service:
+  stage: test
+  tags:
+    - pyats
+  extends:
+    - .merge_commit
+    - .testing
+  script:
+    - pyats run job vpn_service_job.py --webex-token $WEBEX_TOKEN --webex-space $WEBEX_PYATS_SPACE --archive-dir $PYATS_ARCHIVE
+  needs:
+    - prod:load_and_validate_vars
+    - prod:deploy_netbox
+    - prod:deploy_routing
+    - prod:deploy_switching
+
+lifecycle:update_device_baseline:
+  stage: .post
+  tags:
+    - pyats
+  extends:
+    - .merge_commit
+    - .testing
+  script:
+    - pyats run job lifecycle_baseline_job.py
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
+      changes: 
+        - services/*.json
+
+lifecycle:compare_configuration:
+  stage: lifecycle
+  tags:
+    - pyats
+  extends:
+    - .testing
+  script:
+    - pyats run job lifecycle_diff_job.py --webex-token $WEBEX_TOKEN --webex-space $WEBEX_PYATS_SPACE --archive-dir $PYATS_ARCHIVE
+  rules:
+    - if: $LIFECYCLE && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && ( $CI_PIPELINE_SOURCE == "schedule" || $CI_PIPELINE_SOURCE == "web" )
+
+# hidden jobs
+
+.terraform:
+  before_script:
+    - cd ./services/terraform/${DIRECTORY}
+    - rm -rf .terraform
+    - terraform --version
+    - terraform init
+    - shopt -s expand_aliases
+    - alias convert_report="jq -r '([.resource_changes[]?.change.actions?]|flatten)|{\"create\":(map(select(.==\"create\"))|length),\"update\":(map(select(.==\"update\"))|length),\"delete\":(map(select(.==\"delete\"))|length)}'"
+  variables:
+    TF_HTTP_ADDRESS: "${TF_STATE_ADDRESS}/${STATE}"
+    TF_HTTP_LOCK_ADDRESS: "${TF_STATE_ADDRESS}/${STATE}/lock"
+    TF_HTTP_UNLOCK_ADDRESS: "${TF_STATE_ADDRESS}/${STATE}/lock"
+
+.merge_request:
+  variables:
+    NETBOX_URL: https://netbox-staging.its-best.ch
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == $CI_DEFAULT_BRANCH
+      changes: 
+        - services/*.json
+
+.merge_commit:
+  variables:
+    NETBOX_URL: https://netbox.its-best.ch
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $RERUN
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
+      changes: 
+        - services/*.json
+
+.testing:
+  variables:
+    NETBOX_URL: https://netbox.its-best.ch
+  before_script:
+    - cd ./services/pyats
